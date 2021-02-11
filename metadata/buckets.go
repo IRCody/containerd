@@ -15,7 +15,7 @@
 */
 
 // Package metadata stores all labels and object specific metadata by namespace.
-// This package also contains the main garbage collection logic  for cleaning up
+// This package also contains the main garbage collection logic for cleaning up
 // resources consistently and atomically. Resources used by backends will be
 // tracked in the metadata store to be exposed to consumers of this package.
 //
@@ -180,6 +180,41 @@ func createBucketIfNotExists(tx *bolt.Tx, keys ...[]byte) (*bolt.Bucket, error) 
 	}
 
 	return bkt, nil
+}
+
+func namespacesBucketPath() []byte {
+	return bucketKeyVersion
+}
+
+func getNamespacesBucket(tx *bolt.Tx) *bolt.Bucket {
+	return getBucket(tx, namespacesBucketPath())
+}
+
+func getSharableBucket(tx *bolt.Tx, dgst digest.Digest) *bolt.Bucket {
+	var bkt *bolt.Bucket
+	nsbkt := getNamespacesBucket(tx)
+	cur := nsbkt.Cursor()
+	for k, v := cur.First(); k != nil; k, v = cur.Next() {
+		// Check if v has shared values
+		// It looks weird but go will complain that v is
+		// never used if this is not here.
+		_ = v
+		labelsBkt := getNamespaceLabelsBucket(tx, string(k))
+		if labelsBkt == nil {
+			continue
+		}
+		labels := map[string]string{}
+		labelsBkt.ForEach(func(k, v []byte) error {
+			labels[string(k)] = string(v)
+			return nil
+		})
+		// if it is, check if K has image.
+		if _, ok := labels[shared_namespace_label]; ok {
+			bkt = getBlobBucket(tx, string(k), dgst)
+			break
+		}
+	}
+	return bkt
 }
 
 func namespaceLabelsBucketPath(namespace string) [][]byte {
